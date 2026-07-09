@@ -1,5 +1,6 @@
 import os
 import requests
+import threading
 from flask import Flask, request
 
 app = Flask(__name__)
@@ -11,84 +12,79 @@ def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": text,
+        "text": text[:4000],  # Telegram limit
         "parse_mode": "Markdown"
     }
     try:
-        requests.post(url, json=payload, timeout=10)
+        requests.post(url, json=payload, timeout=5)
     except:
         pass
 
-def get_ai_analysis(stock_query):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+def analyze_async(chat_id, ticker):
+    """Run analysis in background thread so Telegram doesn't timeout"""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}"
     
-    headers = {
-        "Content-Type": "application/json"
-    }
+    headers = {"Content-Type": "application/json"}
     
-    prompt = f"""You are an FCN (Fixed Coupon Note) stock analyst.
-Analyze {stock_query} for:
-1. Balance sheet strength
-2. Whether it's trading sideways (range-bound)
-3. 6-month catalyst potential
-4. FCN suitability grade (A+ to F)
+    # Shorter, sharper prompt
+    prompt = f"""FCN analyst. Analyze {ticker}:
+• Balance sheet: Strong/Weak?
+• Sideways? Yes/No, range?
+• 6M catalyst?
+• FCN grade: A+/A/B/C/D/F
 
-Be concise. Use bullet points. Current date: July 2026."""
+Be brief. 1 sentence per point."""
     
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt}
-                ]
-            }
-        ],
+        "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "maxOutputTokens": 500,
-            "temperature": 0.3
+            "maxOutputTokens": 200,  # Much shorter = faster
+            "temperature": 0.1,      # Deterministic = faster
+            "topP": 0.8
         }
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
         data = response.json()
         
         if 'error' in data:
-            error_msg = data.get('error', {}).get('message', 'Unknown error')
-            return f"⚠️ Gemini API Error: {error_msg}\n\nTry /scan for a static list instead."
-        
+            send_telegram_message(chat_id, f"⚠️ {ticker}: {data['error']['message']}\n\nUse /scan for instant list.")
+            return
+            
         if 'candidates' not in data or not data['candidates']:
-            return "⚠️ No response from Gemini. The model may be busy.\n\nTry again in a moment, or use /scan."
+            send_telegram_message(chat_id, f"⚠️ {ticker}: No response from Gemini. Try again or use /scan.")
+            return
         
         analysis = data['candidates'][0]['content']['parts'][0]['text']
-        return analysis
+        send_telegram_message(chat_id, f"📈 *{ticker}*\n\n{analysis}")
         
     except requests.exceptions.Timeout:
-        return "⏱️ Gemini took too long to respond.\n\nThe free tier can be slow during peak hours. Try again later, or use /scan."
-    except requests.exceptions.ConnectionError:
-        return "🔌 Connection error to Gemini.\n\nCheck your internet or try again later. Use /scan as backup."
+        send_telegram_message(chat_id, f"⏱️ {ticker}: Gemini timed out. Free tier is slow during peak hours.\n\nTry /scan for instant results.")
     except Exception as e:
-        return f"❌ Error: {str(e)}\n\nTry /scan for a pre-built mega-cap list."
+        send_telegram_message(chat_id, f"❌ {ticker}: Error - {str(e)[:100]}\n\nUse /scan.")
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
     
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        text = data["message"].get("text", "")
+    if "message" not in data:
+        return "OK", 200
         
-        if text.startswith("/start"):
-            send_telegram_message(chat_id, 
-                "🤖 *FCN Stock Bot*\n\n"
-                "Commands:\n"
-                "• /scan — Daily mega-cap FCN scan\n"
-                "• /analyze [TICKER] — Analyze any stock\n"
-                "• /help — Show help\n\n"
-                "Example: /analyze AAPL")
-        
-        elif text.startswith("/scan"):
-            scan = """📊 *Daily Mega-Cap FCN Scan*
+    chat_id = data["message"]["chat"]["id"]
+    text = data["message"].get("text", "")
+    
+    if text.startswith("/start"):
+        send_telegram_message(chat_id, 
+            "🤖 *FCN Stock Bot*\n\n"
+            "Commands:\n"
+            "• /scan — Instant mega-cap FCN scan\n"
+            "• /analyze [TICKER] — AI analysis (free tier, ~10-20 sec)\n"
+            "• /help — Show help")
+        return "OK", 200
+    
+    elif text.startswith("/scan"):
+        scan = """📊 *Daily Mega-Cap FCN Scan*
 
 *Tier 1 — Best FCN Candidates:*
 • BRK.B — Range-bound, fortress BS
@@ -111,34 +107,36 @@ def webhook():
 *Skip for Now:*
 • AGX — Strong uptrend, not sideways
 """
-            send_telegram_message(chat_id, scan)
-        
-        elif text.startswith("/analyze"):
-            ticker = text.replace("/analyze", "").strip().upper()
-            if ticker:
-                # Send immediate feedback
-                send_telegram_message(chat_id, f"🔍 Analyzing {ticker}... (this may take 10-15 seconds on free tier)")
-                
-                # Get analysis
-                analysis = get_ai_analysis(ticker)
-                
-                # Send result
-                send_telegram_message(chat_id, f"📈 *{ticker} Analysis*\n\n{analysis}")
-            else:
-                send_telegram_message(chat_id, "Usage: /analyze AAPL")
-        
-        elif text.startswith("/help"):
-            send_telegram_message(chat_id, 
-                "*/scan* — Daily pre-built FCN scan (instant)\n"
-                "*/analyze [TICKER]* — AI analysis via Gemini (10-15 sec)\n"
-                "*/help* — This message\n\n"
-                "💡 *Tip:* Free tier can be slow. If /analyze hangs, use /scan.")
-        
-        else:
-            send_telegram_message(chat_id, 
-                "Unknown command. Try /scan or /analyze [TICKER]")
+        send_telegram_message(chat_id, scan)
+        return "OK", 200
     
-    return "OK", 200
+    elif text.startswith("/analyze"):
+        ticker = text.replace("/analyze", "").strip().upper()
+        if not ticker:
+            send_telegram_message(chat_id, "Usage: /analyze AAPL")
+            return "OK", 200
+            
+        # Send immediate acknowledgment
+        send_telegram_message(chat_id, f"🔍 *{ticker}* — Analysis starting...")
+        
+        # Run analysis in background thread (non-blocking)
+        thread = threading.Thread(target=analyze_async, args=(chat_id, ticker))
+        thread.daemon = True
+        thread.start()
+        
+        return "OK", 200
+    
+    elif text.startswith("/help"):
+        send_telegram_message(chat_id, 
+            "*/scan* — Instant pre-built FCN scan\n"
+            "*/analyze [TICKER]* — AI analysis via Gemini (~10-20 sec)\n"
+            "*/help* — This message\n\n"
+            "💡 Free tier can be slow. If /analyze hangs, use /scan.")
+        return "OK", 200
+    
+    else:
+        send_telegram_message(chat_id, "Unknown command. Try /scan or /analyze [TICKER]")
+        return "OK", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
