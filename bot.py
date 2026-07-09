@@ -40,12 +40,11 @@ def get_ai_analysis(stock_query):
         ]
     }
     
-     try:
+    try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         data = response.json()
-        # Debug: log the full response
         if 'choices' not in data:
-            return f"⚠️ API Error: {data}\n\nTry /scan instead."
+            return f"API Error: {str(data)}\n\nTry /scan instead."
         return data['choices'][0]['message']['content']
     except Exception as e:
         return f"Error getting analysis: {str(e)}\n\nTry: /scan for a pre-built mega-cap list."
@@ -60,7 +59,7 @@ def webhook():
         
         if text.startswith("/start"):
             send_telegram_message(chat_id, 
-                "🤖 *FCN Stock Bot*\n\n"
+                "FCN Stock Bot\n\n"
                 "Commands:\n"
                 "/scan — Daily mega-cap FCN scan\n"
                 "/analyze [TICKER] — Analyze any stock\n"
@@ -68,27 +67,27 @@ def webhook():
                 "Example: /analyze AAPL")
         
         elif text.startswith("/scan"):
-            scan = """📊 *Daily Mega-Cap FCN Scan*
+            scan = """Daily Mega-Cap FCN Scan
 
-*Tier 1 — Best FCN Candidates:*
+Tier 1 — Best FCN Candidates:
 • BRK.B — Range-bound, fortress BS, Buffett's cash pile
 • V — Payment rails, low vol, predictable FCF
 • KO — Dividend aristocrat, historically tight range
 • JNJ — Post-Kenvue, strong pharma BS
 • PG — Consumer staples king, low beta
 
-*Tier 2 — Growth + Consolidation:*
+Tier 2 — Growth + Consolidation:
 • AAPL — Only if range-bound; $200B+ cash
 • MSFT — AI/cloud; wait for consolidation
 • GOOGL — Search + AI; watch for range entry
 • AMZN — AWS growth; post-earnings ranges work
 
-*Tier 3 — Higher Volatility:*
+Tier 3 — Higher Volatility:
 • NVDA — AI leader; only for wide-barrier FCNs
 • META — Social + AI; volatile but strong BS
 • TSLA — Too volatile; skip standard FCNs
 
-*Currently Trending (Skip for now):*
+Currently Trending (Skip for now):
 • AGX — Strong uptrend, not sideways
 """
             send_telegram_message(chat_id, scan)
@@ -96,7 +95,7 @@ def webhook():
         elif text.startswith("/analyze"):
             ticker = text.replace("/analyze", "").strip().upper()
             if ticker:
-                send_telegram_message(chat_id, f"🔍 Analyzing {ticker}...")
+                send_telegram_message(chat_id, f"Analyzing {ticker}...")
                 analysis = get_ai_analysis(ticker)
                 send_telegram_message(chat_id, analysis)
             else:
@@ -104,9 +103,9 @@ def webhook():
         
         elif text.startswith("/help"):
             send_telegram_message(chat_id, 
-                "*/scan* — Daily pre-built FCN scan (no API cost)\n"
-                "*/analyze [TICKER]* — AI analysis of any stock (uses API)\n"
-                "*/help* — This message\n\n"
+                "/scan — Daily pre-built FCN scan (no API cost)\n"
+                "/analyze [TICKER] — AI analysis of any stock (uses API)\n"
+                "/help — This message\n\n"
                 "Note: /analyze uses OpenRouter free tier. "
                 "If quota exceeded, use /scan instead.")
         
