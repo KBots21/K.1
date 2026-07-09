@@ -40,9 +40,12 @@ def get_ai_analysis(stock_query):
         ]
     }
     
-    try:
+     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         data = response.json()
+        # Debug: log the full response
+        if 'choices' not in data:
+            return f"⚠️ API Error: {data}\n\nTry /scan instead."
         return data['choices'][0]['message']['content']
     except Exception as e:
         return f"Error getting analysis: {str(e)}\n\nTry: /scan for a pre-built mega-cap list."
