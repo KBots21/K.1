@@ -14,7 +14,10 @@ def send_telegram_message(chat_id, text):
         "text": text,
         "parse_mode": "Markdown"
     }
-    requests.post(url, json=payload)
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except:
+        pass
 
 def get_ai_analysis(stock_query):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
@@ -39,22 +42,33 @@ Be concise. Use bullet points. Current date: July 2026."""
                     {"text": prompt}
                 ]
             }
-        ]
+        ],
+        "generationConfig": {
+            "maxOutputTokens": 500,
+            "temperature": 0.3
+        }
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
         data = response.json()
         
         if 'error' in data:
-            return f"API Error: {data['error']['message']}\n\nTry /scan instead."
+            error_msg = data.get('error', {}).get('message', 'Unknown error')
+            return f"⚠️ Gemini API Error: {error_msg}\n\nTry /scan for a static list instead."
         
-        # Extract text from Gemini response
+        if 'candidates' not in data or not data['candidates']:
+            return "⚠️ No response from Gemini. The model may be busy.\n\nTry again in a moment, or use /scan."
+        
         analysis = data['candidates'][0]['content']['parts'][0]['text']
         return analysis
         
+    except requests.exceptions.Timeout:
+        return "⏱️ Gemini took too long to respond.\n\nThe free tier can be slow during peak hours. Try again later, or use /scan."
+    except requests.exceptions.ConnectionError:
+        return "🔌 Connection error to Gemini.\n\nCheck your internet or try again later. Use /scan as backup."
     except Exception as e:
-        return f"Error getting analysis: {str(e)}\n\nTry: /scan for a pre-built mega-cap list."
+        return f"❌ Error: {str(e)}\n\nTry /scan for a pre-built mega-cap list."
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
@@ -66,35 +80,35 @@ def webhook():
         
         if text.startswith("/start"):
             send_telegram_message(chat_id, 
-                "FCN Stock Bot\n\n"
+                "🤖 *FCN Stock Bot*\n\n"
                 "Commands:\n"
-                "/scan — Daily mega-cap FCN scan\n"
-                "/analyze [TICKER] — Analyze any stock\n"
-                "/help — Show help\n\n"
+                "• /scan — Daily mega-cap FCN scan\n"
+                "• /analyze [TICKER] — Analyze any stock\n"
+                "• /help — Show help\n\n"
                 "Example: /analyze AAPL")
         
         elif text.startswith("/scan"):
-            scan = """Daily Mega-Cap FCN Scan
+            scan = """📊 *Daily Mega-Cap FCN Scan*
 
-Tier 1 — Best FCN Candidates:
-• BRK.B — Range-bound, fortress BS, Buffett's cash pile
-• V — Payment rails, low vol, predictable FCF
-• KO — Dividend aristocrat, historically tight range
+*Tier 1 — Best FCN Candidates:*
+• BRK.B — Range-bound, fortress BS
+• V — Payment rails, low vol
+• KO — Dividend aristocrat, tight range
 • JNJ — Post-Kenvue, strong pharma BS
 • PG — Consumer staples king, low beta
 
-Tier 2 — Growth + Consolidation:
+*Tier 2 — Growth + Consolidation:*
 • AAPL — Only if range-bound; $200B+ cash
 • MSFT — AI/cloud; wait for consolidation
 • GOOGL — Search + AI; watch for range entry
 • AMZN — AWS growth; post-earnings ranges work
 
-Tier 3 — Higher Volatility:
+*Tier 3 — Higher Volatility:*
 • NVDA — AI leader; only for wide-barrier FCNs
 • META — Social + AI; volatile but strong BS
 • TSLA — Too volatile; skip standard FCNs
 
-Currently Trending (Skip for now):
+*Skip for Now:*
 • AGX — Strong uptrend, not sideways
 """
             send_telegram_message(chat_id, scan)
@@ -102,18 +116,23 @@ Currently Trending (Skip for now):
         elif text.startswith("/analyze"):
             ticker = text.replace("/analyze", "").strip().upper()
             if ticker:
-                send_telegram_message(chat_id, f"Analyzing {ticker}...")
+                # Send immediate feedback
+                send_telegram_message(chat_id, f"🔍 Analyzing {ticker}... (this may take 10-15 seconds on free tier)")
+                
+                # Get analysis
                 analysis = get_ai_analysis(ticker)
-                send_telegram_message(chat_id, analysis)
+                
+                # Send result
+                send_telegram_message(chat_id, f"📈 *{ticker} Analysis*\n\n{analysis}")
             else:
                 send_telegram_message(chat_id, "Usage: /analyze AAPL")
         
         elif text.startswith("/help"):
             send_telegram_message(chat_id, 
-                "/scan — Daily pre-built FCN scan (no API cost)\n"
-                "/analyze [TICKER] — AI analysis of any stock (uses Gemini)\n"
-                "/help — This message\n\n"
-                "Note: /analyze uses Google Gemini free tier.")
+                "*/scan* — Daily pre-built FCN scan (instant)\n"
+                "*/analyze [TICKER]* — AI analysis via Gemini (10-15 sec)\n"
+                "*/help* — This message\n\n"
+                "💡 *Tip:* Free tier can be slow. If /analyze hangs, use /scan.")
         
         else:
             send_telegram_message(chat_id, 
