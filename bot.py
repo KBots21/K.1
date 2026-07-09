@@ -33,7 +33,7 @@ def get_ai_analysis(stock_query):
     Be concise. Use bullet points."""
     
     payload = {
-        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "model": "deepseek/deepseek-chat:free",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Analyze {stock_query} for FCN trading suitability. Current date: July 2026."}
