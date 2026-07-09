@@ -5,7 +5,7 @@ from flask import Flask, request
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -17,35 +17,42 @@ def send_telegram_message(chat_id, text):
     requests.post(url, json=payload)
 
 def get_ai_analysis(stock_query):
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    system_prompt = """You are an FCN (Fixed Coupon Note) stock analyst.
-    Analyze the requested stock for:
-    1. Balance sheet strength
-    2. Whether it's trading sideways (range-bound)
-    3. 6-month catalyst potential
-    4. FCN suitability grade (A+ to F)
-    
-    Be concise. Use bullet points."""
+    prompt = f"""You are an FCN (Fixed Coupon Note) stock analyst.
+Analyze {stock_query} for:
+1. Balance sheet strength
+2. Whether it's trading sideways (range-bound)
+3. 6-month catalyst potential
+4. FCN suitability grade (A+ to F)
+
+Be concise. Use bullet points. Current date: July 2026."""
     
     payload = {
-        "model": "deepseek/deepseek-chat:free",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Analyze {stock_query} for FCN trading suitability. Current date: July 2026."}
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
         ]
     }
     
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         data = response.json()
-        if 'choices' not in data:
-            return f"API Error: {str(data)}\n\nTry /scan instead."
-        return data['choices'][0]['message']['content']
+        
+        if 'error' in data:
+            return f"API Error: {data['error']['message']}\n\nTry /scan instead."
+        
+        # Extract text from Gemini response
+        analysis = data['candidates'][0]['content']['parts'][0]['text']
+        return analysis
+        
     except Exception as e:
         return f"Error getting analysis: {str(e)}\n\nTry: /scan for a pre-built mega-cap list."
 
@@ -104,10 +111,9 @@ Currently Trending (Skip for now):
         elif text.startswith("/help"):
             send_telegram_message(chat_id, 
                 "/scan — Daily pre-built FCN scan (no API cost)\n"
-                "/analyze [TICKER] — AI analysis of any stock (uses API)\n"
+                "/analyze [TICKER] — AI analysis of any stock (uses Gemini)\n"
                 "/help — This message\n\n"
-                "Note: /analyze uses OpenRouter free tier. "
-                "If quota exceeded, use /scan instead.")
+                "Note: /analyze uses Google Gemini free tier.")
         
         else:
             send_telegram_message(chat_id, 
